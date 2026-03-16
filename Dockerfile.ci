@@ -6,11 +6,21 @@ RUN yum -y install --setopt=skip_missing_names_on_install=False \
   jq \
   unzip \
   && yum clean all
-RUN curl -fsSL -o /tmp/get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 \
-  && chmod +x /tmp/get_helm.sh && /tmp/get_helm.sh && rm /tmp/get_helm.sh
+RUN HELM_VERSION=v3.17.3 \
+  && curl -fsSL -o /tmp/get_helm.sh "https://raw.githubusercontent.com/helm/helm/${HELM_VERSION}/scripts/get-helm-3" \
+  && chmod +x /tmp/get_helm.sh && DESIRED_VERSION=${HELM_VERSION} /tmp/get_helm.sh && rm /tmp/get_helm.sh
 RUN TERRAFORM_VERSION=1.9.8 \
   && curl -fsSL -o /tmp/terraform.zip "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip" \
   && unzip -o /tmp/terraform.zip -d /usr/local/bin/ && rm /tmp/terraform.zip
-RUN curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" \
-  && chmod 755 kubectl && mv kubectl /usr/local/bin/
-RUN helm plugin install https://github.com/aslafy-z/helm-git
+RUN KUBECTL_VERSION=v1.32.3 \
+  && curl -fsSL -o /tmp/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
+  && chmod 755 /tmp/kubectl && mv /tmp/kubectl /usr/local/bin/kubectl
+RUN helm plugin install https://github.com/aslafy-z/helm-git --version v1.5.2
+RUN GCLOUD_TAR="google-cloud-cli-linux-x86_64.tar.gz" \
+  && curl -fsSL -o "/tmp/$GCLOUD_TAR" "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/$GCLOUD_TAR" \
+  && tar -xzf "/tmp/$GCLOUD_TAR" -C /opt \
+  && /opt/google-cloud-sdk/install.sh --quiet --path-update=true \
+  && /opt/google-cloud-sdk/bin/gcloud components install gke-gcloud-auth-plugin --quiet \
+  && rm "/tmp/$GCLOUD_TAR"
+ENV PATH="/opt/google-cloud-sdk/bin:${PATH}"
+ENV USE_GKE_GCLOUD_AUTH_PLUGIN=True

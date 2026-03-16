@@ -18,9 +18,10 @@ SENTINEL_IMAGE_TAG ?= v0.1.1
 ADAPTER_IMAGE_TAG  ?= v0.1.1
 DRY_RUN            ?=
 AUTO_APPROVE       ?=
-# Derived flags from boolean variables
-DRY_RUN_FLAG     := $(if $(DRY_RUN),--dry-run)
-AUTO_APPROVE_FLAG := $(if $(AUTO_APPROVE),-auto-approve)
+# Derived flags from boolean variables (only true/1 are treated as truthy)
+TRUTHY_VALUES     := true 1
+DRY_RUN_FLAG      := $(if $(filter $(TRUTHY_VALUES),$(DRY_RUN)),--dry-run)
+AUTO_APPROVE_FLAG := $(if $(filter $(TRUTHY_VALUES),$(AUTO_APPROVE)),-auto-approve)
 
 # Chart source configuration (helm-git plugin)
 # Chart refs are independent of image tags so that overriding an image tag
@@ -452,8 +453,8 @@ help: ## Print available targets
 	@echo "  SENTINEL_CHART_REF Git ref for sentinel helm chart source (default: SENTINEL_IMAGE_TAG)"
 	@echo "  ADAPTER_CHART_REF  Git ref for adapter helm chart source (default: ADAPTER_IMAGE_TAG)"
 	@echo "  MAESTRO_CONSUMER Maestro consumer name (default: cluster1)"
-	@echo "  DRY_RUN          Set to any value (e.g., true) for Helm dry-run mode (default: empty)"
-	@echo "  AUTO_APPROVE     Set to any value (e.g., true) for non-interactive Terraform (default: empty)"
+	@echo "  DRY_RUN          Set to true or 1 for Helm dry-run mode (default: empty)"
+	@echo "  AUTO_APPROVE     Set to true or 1 for non-interactive Terraform (default: empty)"
 	@echo ""
 	@echo "Targets:"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-28s\033[0m %s\n", $$1, $$2}'
