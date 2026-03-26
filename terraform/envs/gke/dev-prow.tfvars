@@ -32,7 +32,7 @@ gcp_subnetwork = "hyperfleet-dev-vpc-subnet"
 # =============================================================================
 node_count   = 1               # Start with 1 node for dev
 machine_type = "e2-standard-4" # 4 vCPU, 16GB RAM
-use_spot_vms = true            # ~70% cost savings, may be preempted
+use_spot_vms = false           # ~70% cost savings, may be preempted
 
 # IMPORTANT: Enable deletion protection for this shared long-running cluster
 # This prevents accidental deletion via terraform destroy
@@ -42,27 +42,27 @@ enable_deletion_protection = true
 # =============================================================================
 # Pub/Sub Configuration (for HyperFleet messaging)
 # =============================================================================
-use_pubsub         = true # Set to true to use Google Pub/Sub for event messaging
-enable_dead_letter = true # Enable dead letter queue for failed messages
+use_pubsub         = false # Set to true to use Google Pub/Sub for event messaging
+enable_dead_letter = false # Enable dead letter queue for failed messages
 
 # Topic configurations - each topic can have different subscriptions and publishers
 # Uncomment and customize as needed for your development environment
-pubsub_topic_configs = {
-  clusters = {
-    subscribers = {
-      adapter2 = {}
-      adapter1 = {}
-    }
-    publishers = {
-      sentinel = {}
-    }
-  }
-  nodepools = {
-    subscribers = {
-      adapter3 = {}
-    }
-    publishers = {
-      sentinel = {}
-    }
-  }
-}
+# pubsub_topic_configs = {
+#   clusters = {
+#     subscribers = {
+#       adapter2 = {}
+#       adapter1 = {}
+#     }
+#     publishers = {
+#       sentinel = {}
+#     }
+#   }
+#   nodepools = {
+#     subscribers = {
+#       adapter3 = {}
+#     }
+#     publishers = {
+#       sentinel = {}
+#     }
+#   }
+# }
