@@ -295,7 +295,16 @@ test_dogfood() {
     if [[ -n "$stale_id" ]]; then
       curl -s -X DELETE --max-time 10 ${API_IDENTITY_HEADER} \
         "${api_healthy}/api/hyperfleet/v1/clusters/${stale_id}" &>/dev/null || true
-      sleep 2
+      # Wait for stale cluster to be fully removed
+      local wait_stale=0
+      while [[ $wait_stale -lt 30 ]]; do
+        local stale_status
+        stale_status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
+          "${api_healthy}/api/hyperfleet/v1/clusters/${stale_id}" 2>/dev/null) || stale_status="error"
+        [[ "$stale_status" == "404" ]] && break
+        sleep 5
+        wait_stale=$((wait_stale + 5))
+      done
     fi
 
     # Create test cluster
@@ -359,6 +368,16 @@ test_dogfood() {
         if [[ "$CLEANUP" == true ]]; then
           curl -s -X DELETE --max-time 10 ${API_IDENTITY_HEADER} \
             "${api_healthy}/api/hyperfleet/v1/clusters/${cluster_id}" &>/dev/null || true
+          # Wait for cluster to be fully removed
+          local wait_del=0
+          while [[ $wait_del -lt 30 ]]; do
+            local del_status
+            del_status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
+              "${api_healthy}/api/hyperfleet/v1/clusters/${cluster_id}" 2>/dev/null) || del_status="error"
+            [[ "$del_status" == "404" ]] && break
+            sleep 5
+            wait_del=$((wait_del + 5))
+          done
           echo "  Test cluster cleaned up"
         else
           echo "  Skipping cleanup (--no-cleanup)"

@@ -190,28 +190,74 @@ wait_deleted() {
   return 1
 }
 
-# Clean up a cluster (soft delete + wait for removal). Silent on failure.
-cleanup_cluster() {
+# Report Finalized=True for an adapter. Unblocks cluster deletion when
+# the adapter cannot process the delete event (broken config or removed).
+force_finalize_adapter() {
+  local api_url="$1" cluster_id="$2" adapter="$3" generation="$4"
+  curl -s -o /dev/null -X PUT --max-time 5 \
+    -H "Content-Type: application/json" ${API_IDENTITY_HEADER} \
+    "${api_url}/api/hyperfleet/v1/clusters/${cluster_id}/statuses" \
+    -d "{\"adapter\":\"${adapter}\",\"conditions\":[{\"type\":\"Applied\",\"status\":\"False\",\"reason\":\"TestCleanup\",\"message\":\"Cleaned by test script\"},{\"type\":\"Available\",\"status\":\"False\",\"reason\":\"TestCleanup\",\"message\":\"Cleaned by test script\"},{\"type\":\"Health\",\"status\":\"True\",\"reason\":\"TestCleanup\",\"message\":\"Cleaned by test script\"},{\"type\":\"Finalized\",\"status\":\"True\",\"reason\":\"TestCleanup\",\"message\":\"Cleaned by test script\"}],\"observed_generation\":${generation}}" \
+    2>/dev/null || true
+}
+
+# Force-finalize all adapters that haven't reported Finalized=True for a soft-deleted cluster.
+force_finalize_all() {
   local api_url="$1" cluster_id="$2"
+  local cluster_json generation statuses adapters_reporting
+
+  cluster_json=$(curl -s --max-time 5 "${api_url}/api/hyperfleet/v1/clusters/${cluster_id}" 2>/dev/null) || return
+  generation=$(echo "$cluster_json" | jq -r '.generation // 0')
+
+  statuses=$(curl -s --max-time 5 "${api_url}/api/hyperfleet/v1/clusters/${cluster_id}/statuses" 2>/dev/null) || return
+  adapters_reporting=$(echo "$statuses" | jq -r '.items[]?.adapter // empty') || true
+
+  for adapter in $adapters_reporting; do
+    local finalized
+    finalized=$(echo "$statuses" | jq -r ".items[]? | select(.adapter==\"${adapter}\") | .conditions[]? | select(.type==\"Finalized\") | .status // \"False\"")
+    if [[ "$finalized" != "True" ]]; then
+      force_finalize_adapter "$api_url" "$cluster_id" "$adapter" "$generation"
+    fi
+  done
+
+  local required_adapters
+  required_adapters=$(echo "$cluster_json" | jq -r '.status.conditions[]? | select(.type=="Reconciled") | .message // ""' \
+    | sed -n 's/.*not reporting Finalized=True: \[\([^]]*\)\].*/\1/p' | tr ',' '\n' | tr -d ' ') || true
+
+  for adapter in $required_adapters; do
+    if [[ -n "$adapter" ]]; then
+      force_finalize_adapter "$api_url" "$cluster_id" "$adapter" "$generation"
+    fi
+  done
+}
+
+# Clean up a cluster: soft delete, wait for full removal, force-finalize if needed.
+cleanup_cluster() {
+  local api_url="$1" cluster_id="$2" force="${3:-false}"
+
   curl -s -o /dev/null -X DELETE --max-time 5 ${API_IDENTITY_HEADER} \
     "${api_url}/api/hyperfleet/v1/clusters/${cluster_id}" 2>/dev/null || true
+
+  if wait_deleted "$api_url" "$cluster_id" 30 >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if [[ "$force" == true ]]; then
+    force_finalize_all "$api_url" "$cluster_id"
+    wait_deleted "$api_url" "$cluster_id" 30 >/dev/null 2>&1 || true
+  fi
 }
 
 # Remove stale test clusters from previous runs
 cleanup_stale() {
-  local api_url="$1" prefix="$2"
+  local api_url="$1" prefix="$2" force="${3:-false}"
   local ids
   ids=$(curl -s --max-time 10 "${api_url}/api/hyperfleet/v1/clusters?size=50" 2>/dev/null \
     | jq -r ".items[]? | select(.name | startswith(\"${prefix}\")) | .id" 2>/dev/null) || true
 
   for id in $ids; do
-    cleanup_cluster "$api_url" "$id"
+    cleanup_cluster "$api_url" "$id" "$force"
   done
-
-  # Wait briefly for deletions to process
-  if [[ -n "$ids" ]]; then
-    sleep 10
-  fi
 }
 
 # ── Scenario 1: First Cluster, Fresh Eyes ──
@@ -668,7 +714,7 @@ _test_scenario_3_region() {
 
   section "$tag: New Cluster Stays Stuck"
 
-  cleanup_stale "$api_url" "scenario3-"
+  cleanup_stale "$api_url" "scenario3-" true
 
   local broken_id
   broken_id=$(create_cluster "$api_url" "scenario3-test-${DATE_SUFFIX}") || true
@@ -735,7 +781,7 @@ _test_scenario_3_region() {
   fi
 
   if [[ "$CLEANUP" == true ]]; then
-    cleanup_cluster "$api_url" "$broken_id"
+    cleanup_cluster "$api_url" "$broken_id" true
     echo "  Test cluster cleaned up (pre-seeded stuck clusters preserved)"
   fi
 }
@@ -905,8 +951,8 @@ test_scenario_4() {
 
   section "S4: Adapter in Reconciliation Loop"
 
-  # Clean up stale test clusters
-  cleanup_stale "$api_url" "scenario4-"
+  # Clean up stale test clusters (force: adapter from previous runs may be gone)
+  cleanup_stale "$api_url" "scenario4-" true
 
   # Create a cluster
   local cluster_id
@@ -989,10 +1035,10 @@ test_scenario_4() {
 
   if [[ "$CLEANUP" == true ]]; then
     section "S4: Cleanup"
+    # Delete cluster BEFORE removing the adapter so the adapter can process
+    # the delete event and report Finalized=True.
     cleanup_cluster "$api_url" "$cluster_id"
     helm --kube-context "$ctx" uninstall scenario4-test -n "$participant_ns" 2>/dev/null || true
-    # Wait for configmap cleanup
-    sleep 5
     kubectl --context "$ctx" delete configmap -l app.kubernetes.io/instance=scenario4-test \
       -n "$participant_ns" 2>/dev/null || true
     echo "  Test adapter and cluster cleaned up"
@@ -1148,6 +1194,14 @@ test_scenario_5() {
 
   section "S5: Sentinel Sharding Test"
 
+  # Trap to restore the catch-all sentinel if the script is interrupted
+  _s5_restore_sentinel() {
+    echo "  Restoring catch-all sentinel (cleanup trap)..."
+    kubectl --context "$ctx" scale deploy clusters-hyperfleet-sentinel \
+      -n "$NS_HYPERFLEET" --replicas=1 2>/dev/null || true
+  }
+  trap _s5_restore_sentinel EXIT INT TERM
+
   # Scale down the catch-all sentinel
   kubectl --context "$ctx" scale deploy clusters-hyperfleet-sentinel \
     -n "$NS_HYPERFLEET" --replicas=0 2>/dev/null
@@ -1172,9 +1226,9 @@ test_scenario_5() {
     pass "[S5] Test cluster created with region=us-east (id=${cluster_id:0:12}...)"
   else
     fail "[S5] Failed to create test cluster"
-    # Restore catch-all before returning
-    kubectl --context "$ctx" scale deploy clusters-hyperfleet-sentinel \
-      -n "$NS_HYPERFLEET" --replicas=1 2>/dev/null
+    # Restore catch-all before returning (trap will also fire, but idempotent)
+    _s5_restore_sentinel
+    trap - EXIT INT TERM
     if [[ "$CLEANUP" == true ]]; then
       helm --kube-context "$ctx" uninstall sentinel-us-east -n "$participant_ns" 2>/dev/null || true
     fi
@@ -1205,9 +1259,9 @@ test_scenario_5() {
 
   section "S5: Restore & Cleanup"
 
-  # Scale catch-all sentinel back up
-  kubectl --context "$ctx" scale deploy clusters-hyperfleet-sentinel \
-    -n "$NS_HYPERFLEET" --replicas=1 2>/dev/null
+  # Scale catch-all sentinel back up and clear trap
+  _s5_restore_sentinel
+  trap - EXIT INT TERM
   echo "  Catch-all sentinel restored"
 
   if [[ "$CLEANUP" == true ]]; then
