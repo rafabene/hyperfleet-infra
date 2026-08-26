@@ -92,6 +92,17 @@ releases:
     values:
       - values/base-gateway.yaml.gotmpl
 
+  - name: network-policies
+    namespace: {{ .Values.namespace }}
+    chart: ../helm/network-policies
+    needs:
+      - hyperfleet-api
+      - hyperfleet-gateway
+    labels:
+      component: network-policies
+    values:
+      - values/base-network-policies.yaml.gotmpl
+
 {{ range .Values.sentinels }}
   - name: {{ .name }}
     namespace: {{ $.Values.namespace }}
