@@ -1,14 +1,14 @@
-{{- if .Values.extAuthz.enabled }}
-{{- $model := .Values.tenantModel | default "onprem" }}
-{{- $cfg := index .Values.tenantModels $model }}
+{{- if .Values.auth.extAuthz.enabled }}
+{{- $model := .Values.tenant.model | default "onprem" }}
+{{- $cfg := index .Values.tenant.models $model }}
 {{- if not $cfg }}
-{{- fail (printf "tenantModel %q not found in .Values.tenantModels (expected e.g. onprem|oracle)" $model) }}
+{{- fail (printf "tenant.model %q not found in .Values.tenant.models (expected e.g. onprem|oracle)" $model) }}
 {{- end }}
-{{- if not .Values.oidc.issuerUrl }}
-{{- fail "oidc.issuerUrl (OIDC_ISSUER_URL) is required when extAuthz.enabled=true: the gateway is fail-closed and an empty issuer means every request is denied" }}
+{{- if not .Values.auth.oidc.issuerUrl }}
+{{- fail "auth.oidc.issuerUrl (OIDC_ISSUER_URL) is required when auth.extAuthz.enabled=true: the gateway is fail-closed and an empty issuer means every request is denied" }}
 {{- end }}
-{{- if not (regexMatch "^https://" .Values.oidc.issuerUrl) }}
-{{- fail (printf "oidc.issuerUrl must be an https:// URL (got: %q)" .Values.oidc.issuerUrl) }}
+{{- if not (regexMatch "^https://" .Values.auth.oidc.issuerUrl) }}
+{{- fail (printf "auth.oidc.issuerUrl must be an https:// URL (got: %q)" .Values.auth.oidc.issuerUrl) }}
 {{- end }}
 # Human OIDC tenant policy (stable name; model swap replaces in place).
 # Machine identity: HYPERFLEET-1480 TODOs below.
@@ -25,7 +25,7 @@ spec:
     - {{ include "hyperfleet-gateway.fullname" . | quote }}
     - {{ printf "%s.%s.svc.cluster.local" (include "hyperfleet-gateway.fullname" .) .Release.Namespace | quote }}
     - "localhost"
-    {{- range .Values.authorino.hosts }}
+    {{- range .Values.auth.authorino.hosts }}
     - {{ . | quote }}
     {{- end }}
   authentication:
@@ -37,7 +37,7 @@ spec:
     "human-jwt":
       jwt:
         # TODO(HYPERFLEET-1485): kind needs mock IdP for oidc.issuerUrl in e2e.
-        issuerUrl: {{ .Values.oidc.issuerUrl | quote }}
+        issuerUrl: {{ .Values.auth.oidc.issuerUrl | quote }}
       credentials:
         authorizationHeader: {}
       # hf_system default for humans; structure ready for HYPERFLEET-1480 machine method.

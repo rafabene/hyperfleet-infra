@@ -24,11 +24,11 @@ data:
                         typed_config:
                           "@type": type.googleapis.com/envoy.extensions.http.early_header_mutation.header_mutation.v3.HeaderMutation
                           mutations:
-                            {{- range .Values.stripHeaders }}
+                            {{- range .Values.envoy.stripHeaders }}
                             - remove: {{ . }}
                             {{- end }}
                     http_filters:
-                      {{- if .Values.extAuthz.enabled }}
+                      {{- if .Values.auth.extAuthz.enabled }}
                       # ext_authz runs before the router: Authorino authenticates
                       # the request and injects trusted tenant headers, which the
                       # router then forwards upstream. Fail-closed and not
@@ -41,7 +41,7 @@ data:
                           grpc_service:
                             envoy_grpc:
                               cluster_name: authorino
-                            timeout: {{ .Values.extAuthz.timeout }}
+                            timeout: {{ .Values.auth.extAuthz.timeout }}
                       {{- end }}
                       - name: envoy.filters.http.router
                         typed_config:
@@ -53,7 +53,7 @@ data:
                           domains:
                             - "*"
                           routes:
-                            {{- if .Values.retryPolicy.enabled }}
+                            {{- if .Values.envoy.retryPolicy.enabled }}
                             # Retries only apply to methods that are safe to duplicate on the
                             # backend. POST (create) is excluded so a retried request can't
                             # surface as a spurious 409. PATCH is excluded too: a patch that
@@ -68,20 +68,20 @@ data:
                                         regex: "GET|HEAD|PUT|DELETE"
                               route:
                                 cluster: upstream
-                                timeout: {{ .Values.retryPolicy.timeout }}
+                                timeout: {{ .Values.envoy.retryPolicy.timeout }}
                                 retry_policy:
-                                  retry_on: "{{ .Values.retryPolicy.retryOn }}"
-                                  num_retries: {{ .Values.retryPolicy.numRetries }}
-                                  per_try_timeout: {{ .Values.retryPolicy.perTryTimeout }}
+                                  retry_on: "{{ .Values.envoy.retryPolicy.retryOn }}"
+                                  num_retries: {{ .Values.envoy.retryPolicy.numRetries }}
+                                  per_try_timeout: {{ .Values.envoy.retryPolicy.perTryTimeout }}
                             {{- end }}
                             - match:
                                 prefix: /
                               route:
                                 cluster: upstream
       clusters:
-        {{- if .Values.extAuthz.enabled }}
+        {{- if .Values.auth.extAuthz.enabled }}
         - name: authorino
-          connect_timeout: 0.25s
+          connect_timeout: 3s
           type: STRICT_DNS
           lb_policy: ROUND_ROBIN
           # Authorino's authorization API is gRPC, which requires HTTP/2 upstream.
@@ -97,11 +97,11 @@ data:
                   - endpoint:
                       address:
                         socket_address:
-                          address: {{ .Values.extAuthz.cluster }}.{{ .Release.Namespace }}.svc.cluster.local
-                          port_value: {{ .Values.extAuthz.port }}
+                          address: {{ .Values.auth.extAuthz.cluster }}.{{ .Release.Namespace }}.svc.cluster.local
+                          port_value: {{ .Values.auth.extAuthz.port }}
         {{- end }}
         - name: upstream
-          connect_timeout: 1s
+          connect_timeout: 10s
           type: STRICT_DNS
           lb_policy: ROUND_ROBIN
           load_assignment:
@@ -111,8 +111,8 @@ data:
                   - endpoint:
                       address:
                         socket_address:
-                          address: {{ .Values.upstream.host }}.{{ .Release.Namespace }}.svc.cluster.local
-                          port_value: {{ .Values.upstream.port }}
+                          address: {{ .Values.envoy.upstream.host }}.{{ .Release.Namespace }}.svc.cluster.local
+                          port_value: {{ .Values.envoy.upstream.port }}
     admin:
       address:
         socket_address:
