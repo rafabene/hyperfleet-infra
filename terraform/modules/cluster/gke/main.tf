@@ -13,6 +13,12 @@ resource "google_container_cluster" "primary" {
     services_secondary_range_name = var.services_range_name
   }
 
+  # GKE Dataplane V2 (Cilium-based) — required for NetworkPolicy enforcement.
+  # Without this, helm/network-policies' NetworkPolicy objects are inert.
+  # NOTE: immutable after cluster creation — changing this on an existing
+  # cluster requires recreating it, not an in-place update.
+  datapath_provider = "ADVANCED_DATAPATH"
+
   # We manage the node pool separately
   remove_default_node_pool = true
   initial_node_count       = 1

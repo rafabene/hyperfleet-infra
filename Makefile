@@ -84,13 +84,35 @@ get-credentials: check-terraform ## Configure kubectl credentials from Terraform
 
 
 # ==== Kind Targets ====
+KIND_CONFIG ?= scripts/kind-config.yaml
+
+# kind's default CNI (kindnet) has no NetworkPolicy enforcement, so it's
+# disabled (see scripts/kind-config.yaml) and install-kind-cilium installs
+# Cilium as the sole CNI, providing both pod networking and policy enforcement.
+# GKE gets equivalent enforcement via Dataplane V2 (see terraform/modules/cluster/gke),
+# though its managed Cilium build may differ in version/config from this pinned chart.
+CILIUM_VERSION   ?= 1.20.1
+CILIUM_NAMESPACE ?= kube-system
+
 .PHONY: create-kind-cluster
 create-kind-cluster: check-kind ## Create a new kind cluster or export kubeconfig if exists
+	@test -n "$(KIND_CLUSTER_NAME)" || { echo "ERROR: KIND_CLUSTER_NAME is empty. HELMFILE_ENV=$(HELMFILE_ENV) does not include env.kind (only HELMFILE_ENV values without 'gcp' do) - run with HELMFILE_ENV=kind or e2e-kind."; exit 1; }
 	@if kind get clusters 2>/dev/null | grep -q "^$(KIND_CLUSTER_NAME)$$"; then \
 		echo "kind cluster '$(KIND_CLUSTER_NAME)' already exists ..."; \
+		_kindnet_check_kubeconfig=$$(mktemp); \
+		kind get kubeconfig --name $(KIND_CLUSTER_NAME) > $$_kindnet_check_kubeconfig; \
+		_has_kindnet=0; \
+		kubectl --kubeconfig $$_kindnet_check_kubeconfig get daemonset -n kube-system kindnet >/dev/null 2>&1 && _has_kindnet=1; \
+		rm -f $$_kindnet_check_kubeconfig; \
+		if [ "$$_has_kindnet" = "1" ]; then \
+			echo "ERROR: existing kind cluster '$(KIND_CLUSTER_NAME)' still runs the default CNI (kindnet)."; \
+			echo "It predates disableDefaultCNI, so Cilium NetworkPolicy enforcement will not be effective."; \
+			echo "Delete and recreate it: make delete-kind-cluster KIND_CLUSTER_NAME=$(KIND_CLUSTER_NAME) && make create-kind-cluster KIND_CLUSTER_NAME=$(KIND_CLUSTER_NAME)"; \
+			exit 1; \
+		fi; \
 	else \
 		echo "Creating new kind cluster '$(KIND_CLUSTER_NAME)'..."; \
-		kind create cluster --name $(KIND_CLUSTER_NAME); \
+		kind create cluster --name $(KIND_CLUSTER_NAME) --config $(KIND_CONFIG); \
 	fi
 	@kind export kubeconfig --name $(KIND_CLUSTER_NAME) --kubeconfig $(KUBECONFIG)
 	@kubectl config use-context kind-$(KIND_CLUSTER_NAME) --kubeconfig $(KUBECONFIG)
@@ -110,6 +132,28 @@ else
 	@echo "[NOTE: Skipping building images for kind cluster]"
 	@echo "To enable kind image builds set BUILD_IMAGES=true in env.kind"
 endif
+
+# macOS + podman: the podman machine must run rootful (podman machine set
+# --rootful <name>) or Cilium's bpf-mount init container crash-loops -
+# rootless podman can't mount bpffs.
+.PHONY: install-kind-cilium
+install-kind-cilium: check-helm check-kubectl-context ## Install Cilium CNI on the kind cluster (GKE uses Dataplane V2 instead)
+	@echo "Installing Cilium $(CILIUM_VERSION)..."
+	@helm repo add cilium https://helm.cilium.io/ >/dev/null
+	@helm repo update cilium >/dev/null
+	helm upgrade --install $(DRY_RUN_FLAG) cilium cilium/cilium \
+		--version $(CILIUM_VERSION) \
+		--namespace $(CILIUM_NAMESPACE) \
+		--set ipam.mode=kubernetes \
+		--set operator.replicas=1 \
+		--wait --timeout 5m
+	@kubectl wait --for=condition=Ready pod -l k8s-app=cilium --namespace $(CILIUM_NAMESPACE) --timeout=180s
+	@echo "OK: Cilium is ready"
+
+.PHONY: uninstall-kind-cilium
+uninstall-kind-cilium: check-helm check-kubectl-context ## Uninstall Cilium CNI from the kind cluster
+	@helm uninstall cilium --namespace $(CILIUM_NAMESPACE) || true
+	@echo "OK: Cilium uninstalled (cluster networking is broken until Cilium is reinstalled or the cluster is deleted)"
 
 # ==== Helmfile Targets ====
 .PHONY: template-helmfile
@@ -682,13 +726,25 @@ validate-authorino: check-helm ## Validate gateway auth templates
 		|| { echo "ERROR: configured authorino.hosts entry not rendered"; exit 1; }
 	@echo "OK: Authorino gateway templates valid (ext_authz before router, fail-closed, when-gated optional header, model guard, additive AUTHORINO_HOSTS)"
 
+.PHONY: validate-network-policies
+validate-network-policies: check-helm ## Validate network-policies Helm chart rendering
+	@echo "Validating network-policies chart..."
+	@out=$$(helm template netpol $(HELM_DIR)/network-policies --set namespace=hyperfleet-local) \
+		|| { echo "ERROR: network-policies chart failed to render"; exit 1; }; \
+	echo "$$out" | grep -q "name: hyperfleet-api-ingress" \
+		|| { echo "ERROR: hyperfleet-api-ingress NetworkPolicy not rendered"; exit 1; }; \
+	echo "$$out" | grep -q "name: hyperfleet-api-postgres-ingress" \
+		|| { echo "ERROR: hyperfleet-api-postgres-ingress NetworkPolicy not rendered"; exit 1; }
+	@echo "OK: network-policies chart rendered successfully"
+
 .PHONY: ci-validate
 ci-validate: validate-terraform lint-helm lint-shellcheck ## Ci validate: validate terraform + lint helm + lint shellcheck
 
 .PHONY: ci-dry-run
-ci-dry-run: ci-validate ## Ci dry-run: ci-validate + validate maestro + validate authorino
+ci-dry-run: ci-validate ## Ci dry-run: ci-validate + validate maestro + validate authorino + validate network policies
 	$(MAKE) validate-maestro
 	$(MAKE) validate-authorino
+	$(MAKE) validate-network-policies
 
 .PHONY: health-check-maestro
 health-check-maestro: check-kubectl ## Verify Maestro Components
@@ -712,7 +768,7 @@ ci-cleanup: uninstall-maestro destroy-terraform ## Ci cleanup: uninstall maestro
 # Kind targets
 
 .PHONY: local-up-kind
-local-up-kind: create-kind-cluster kind-build-images install-priority-classes install-maestro-all generate-rabbitmq-values maybe-install-grafana maybe-install-tracing install-hyperfleet ## Full local kind setup
+local-up-kind: create-kind-cluster install-kind-cilium kind-build-images install-priority-classes install-maestro-all generate-rabbitmq-values maybe-install-grafana maybe-install-tracing install-hyperfleet ## Full local kind setup
 
 .PHONY: local-down-kind
 local-down-kind: uninstall-hyperfleet uninstall-tracing uninstall-grafana uninstall-maestro delete-kind-cluster ## Tear down kind stack and delete cluster

@@ -1,0 +1,66 @@
+# Default values for network-policies.
+nameOverride: ""
+fullnameOverride: ""
+
+monitoringNamespace: monitoring
+
+# Name/instance labels of the workloads this chart guards. Must match the
+# `app.kubernetes.io/name` and `app.kubernetes.io/instance` labels rendered by
+# the hyperfleet-api and hyperfleet-gateway releases (helmfile release names by
+# default) — override these if either release is installed under a different
+# name or release instance.
+apiNameLabel: hyperfleet-api
+apiInstanceLabel: hyperfleet-api
+gatewayNameLabel: hyperfleet-gateway
+gatewayInstanceLabel: hyperfleet-gateway
+
+# Add or edit policies here — this is the only file that needs to change.
+# `podSelector` and `ingress` are passed through `tpl`, so they can reference
+# `.Values` (e.g. the labels above).
+networkPolicies:
+  - name: hyperfleet-api-ingress
+    podSelector:
+      app.kubernetes.io/name: "{{ .Values.apiNameLabel }}"
+      app.kubernetes.io/instance: "{{ .Values.apiInstanceLabel }}"
+      app.kubernetes.io/component: api
+    ingress:
+      # Sole ingress source for the API's app port: the gateway. No
+      # sentinel/adapter exception — they reach the API through the gateway
+      # (baseUrl defaults to http://hyperfleet-gateway:8000).
+      - from:
+          - podSelector:
+              matchLabels:
+                app.kubernetes.io/name: "{{ .Values.gatewayNameLabel }}"
+                app.kubernetes.io/instance: "{{ .Values.gatewayInstanceLabel }}"
+        ports:
+          - protocol: TCP
+            port: 8000
+      # Prometheus metrics-only exception: the actual Prometheus pods
+      # (not the whole monitoring namespace), scrape :9090 only.
+      - from:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: "{{ .Values.monitoringNamespace }}"
+            podSelector:
+              matchLabels:
+                app.kubernetes.io/name: prometheus
+                operator.prometheus.io/name: kube-prometheus-stack-prometheus
+        ports:
+          - protocol: TCP
+            port: 9090
+
+  - name: hyperfleet-api-postgres-ingress
+    podSelector:
+      app.kubernetes.io/name: "{{ .Values.apiNameLabel }}"
+      app.kubernetes.io/instance: "{{ .Values.apiInstanceLabel }}"
+      app.kubernetes.io/component: postgresql
+    ingress:
+      - from:
+          - podSelector:
+              matchLabels:
+                app.kubernetes.io/name: "{{ .Values.apiNameLabel }}"
+                app.kubernetes.io/instance: "{{ .Values.apiInstanceLabel }}"
+                app.kubernetes.io/component: api
+        ports:
+          - protocol: TCP
+            port: 5432
