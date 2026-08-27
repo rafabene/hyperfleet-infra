@@ -12,86 +12,151 @@ fullnameOverride: ""
 image:
   registry: ""
   repository: envoyproxy/envoy
-  tag: v1.39.0
+  tag: v1.39.1
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []
 
 # -----------------------------------------------------------------------------
-# Gateway — Envoy proxy behavior (listener, upstream, header handling)
+# Deployment — Kubernetes workload settings (Pod/Deployment specific)
+# -----------------------------------------------------------------------------
+deployment:
+  replicaCount: 2
+
+  podDisruptionBudget:
+    enabled: true
+    maxUnavailable: 1
+
+  probes:
+    readiness:
+      initialDelaySeconds: 5
+      periodSeconds: 5
+    liveness:
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      failureThreshold: 3
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  # Defaults to a preferred anti-affinity spreading replicas across nodes
+  affinity: {}
+
+  nodeSelector: {}
+  tolerations: []
+
+  podAnnotations: {}
+  podLabels: {}
+
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+
+  podSecurityContext:
+    fsGroup: 65532
+    runAsNonRoot: true
+    runAsUser: 65532
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: true
+    seccompProfile:
+      type: RuntimeDefault
+
+# -----------------------------------------------------------------------------
+# Service — Kubernetes Service settings
 # -----------------------------------------------------------------------------
 service:
   type: ClusterIP
   port: 8000
   adminPort: 9901
 
-# Backend hyperfleet-api is proxied to
-upstream:
-  host: hyperfleet-api
-  port: 8000
+# -----------------------------------------------------------------------------
+# Envoy — gateway/proxy behavior knobs that are customized
+# per deployment/environment. The rest of the Envoy configuration lives
+# directly in templates/configmap.yaml.
+# -----------------------------------------------------------------------------
+envoy:
+  # Backend hyperfleet-api is proxied to
+  upstream:
+    host: hyperfleet-api
+    port: 8000
 
-# Strip forged identity/tenant headers before ext_authz.
-stripHeaders:
-  - x-tenant-org
-  - x-tenant-project
-  - x-tenant-tenancy-ocid
-  - x-tenant-compartment
-  - x-hyperfleet-system
-  - x-hyperfleet-identity
+  # Strip forged identity/tenant headers before ext_authz.
+  stripHeaders:
+    - x-tenant-org
+    - x-tenant-project
+    - x-tenant-tenancy-ocid
+    - x-tenant-compartment
+    - x-hyperfleet-system
+    - x-hyperfleet-identity
 
-retryPolicy:
-  enabled: true
-  retryOn: connect-failure,refused-stream,reset,gateway-error
-  numRetries: 3
-  perTryTimeout: 15s
-  timeout: 45s
+  retryPolicy:
+    enabled: true
+    retryOn: connect-failure,refused-stream,reset,gateway-error
+    numRetries: 3
+    perTryTimeout: 15s
+    timeout: 45s
 
 # -----------------------------------------------------------------------------
-# Authentication - Authorino ext_authz gateway and per-model AuthConfig
+# Authentication — Authorino ext_authz gateway and OIDC settings
 # -----------------------------------------------------------------------------
-# Authorino ext_authz (requires make install-authorino-operator).
-extAuthz:
-  enabled: false
-  # "<Authorino CR>-authorino-authorization" -> authorino-authorino-authorization
-  cluster: authorino-authorino-authorization
-  port: 50051
-  timeout: 1s
-
-# Rendered when extAuthz.enabled.
-authorino:
-  # Pin published image; align with AUTHORINO_OPERATOR_VERSION in Makefile.
-  image: quay.io/kuadrant/authorino:v0.26.2
-  # TODO(HYPERFLEET-1483): listener/oidcServer TLS and gateway->API NetworkPolicy.
-  tls:
+auth:
+  # Authorino ext_authz (requires make install-authorino-operator).
+  extAuthz:
     enabled: false
-  # Empty: gateway Service DNS + localhost (see authconfig.yaml).
-  hosts: []
+    # "<Authorino CR>-authorino-authorization" -> authorino-authorino-authorization
+    cluster: authorino-authorino-authorization
+    port: 50051
+    timeout: 1s
 
-# Active AuthConfig model (onprem|oracle). Keep in sync with base-api tenant dimensions.
-tenantModel: onprem
+  # Rendered when extAuthz.enabled.
+  authorino:
+    # Pin published image; align with AUTHORINO_OPERATOR_VERSION in Makefile.
+    image: quay.io/kuadrant/authorino:v0.26.2
+    # TODO(HYPERFLEET-1483): listener/oidcServer TLS and gateway->API NetworkPolicy.
+    tls:
+      enabled: false
+    # Empty: gateway Service DNS + localhost (see authconfig.yaml).
+    hosts: []
 
-# Per-model claim->header mappings.
-tenantModels:
-  onprem:
-    requiredRule: require-org
-    required:
-      claim: org_id
-      header: x-tenant-org
-    optional:
-      claim: project_id
-      header: x-tenant-project
-  oracle:
-    requiredRule: require-tenancy-ocid
-    required:
-      claim: tenancy_ocid
-      header: x-tenant-tenancy-ocid
-    optional:
-      claim: compartment_id
-      header: x-tenant-compartment
+  # OIDC issuer for human-jwt AuthConfig (OIDC_ISSUER_URL).
+  oidc:
+    issuerUrl: ""
 
-# OIDC issuer for human-jwt AuthConfig (OIDC_ISSUER_URL).
-oidc:
-  issuerUrl: ""
+# -----------------------------------------------------------------------------
+# Tenant — active AuthConfig model and per-model claim->header mappings
+# -----------------------------------------------------------------------------
+tenant:
+  # Active AuthConfig model (onprem|oracle). Keep in sync with base-api tenant dimensions.
+  model: onprem
+
+  models:
+    onprem:
+      requiredRule: require-org
+      required:
+        claim: org_id
+        header: x-tenant-org
+      optional:
+        claim: project_id
+        header: x-tenant-project
+    oracle:
+      requiredRule: require-tenancy-ocid
+      required:
+        claim: tenancy_ocid
+        header: x-tenant-tenancy-ocid
+      optional:
+        claim: compartment_id
+        header: x-tenant-compartment
 
 # -----------------------------------------------------------------------------
 # Monitoring — scrape Envoy's built-in /stats/prometheus endpoint
@@ -99,63 +164,3 @@ oidc:
 monitoring:
   serviceMonitor:
     enabled: false
-
-# -----------------------------------------------------------------------------
-# Availability — replicas, disruption budget, health checks, capacity
-# -----------------------------------------------------------------------------
-replicaCount: 2
-
-podDisruptionBudget:
-  enabled: true
-  maxUnavailable: 1
-
-probes:
-  readiness:
-    initialDelaySeconds: 5
-    periodSeconds: 5
-  liveness:
-    initialDelaySeconds: 10
-    periodSeconds: 10
-    failureThreshold: 3
-
-resources:
-  requests:
-    cpu: 100m
-    memory: 256Mi
-  limits:
-    cpu: 500m
-    memory: 512Mi
-
-# Leave empty to use the chart's default anti-affinity (preferred, spread across nodes
-# within this release — see templates/deployment.yaml). Set to override or disable.
-affinity: {}
-
-# -----------------------------------------------------------------------------
-# Security — identity and pod/container hardening
-# -----------------------------------------------------------------------------
-serviceAccount:
-  create: true
-  name: ""
-  annotations: {}
-
-podSecurityContext:
-  fsGroup: 65532
-  runAsNonRoot: true
-  runAsUser: 65532
-
-securityContext:
-  allowPrivilegeEscalation: false
-  capabilities:
-    drop:
-      - ALL
-  readOnlyRootFilesystem: true
-  seccompProfile:
-    type: RuntimeDefault
-
-# -----------------------------------------------------------------------------
-# Scheduling and metadata
-# -----------------------------------------------------------------------------
-podAnnotations: {}
-podLabels: {}
-nodeSelector: {}
-tolerations: []

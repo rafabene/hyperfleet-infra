@@ -1,4 +1,4 @@
-{{- if .Values.extAuthz.enabled }}
+{{- if .Values.auth.extAuthz.enabled }}
 # Authorino instance for Envoy ext_authz. Watches AuthConfigs in this namespace.
 apiVersion: operator.authorino.kuadrant.io/v1beta1
 kind: Authorino
@@ -7,15 +7,15 @@ metadata:
   labels:
     {{- include "hyperfleet-gateway.labels" . | nindent 4 }}
 spec:
-  {{- if .Values.authorino.image }}
+  {{- if .Values.auth.authorino.image }}
   # Pin image; operator default may be unpublished on quay.
-  image: {{ .Values.authorino.image | quote }}
+  image: {{ .Values.auth.authorino.image | quote }}
   {{- end }}
   # TODO(HYPERFLEET-1483): listener/oidcServer TLS and gateway->API NetworkPolicy.
   listener:
     tls:
-      enabled: {{ .Values.authorino.tls.enabled }}
+      enabled: {{ .Values.auth.authorino.tls.enabled }}
   oidcServer:
     tls:
-      enabled: {{ .Values.authorino.tls.enabled }}
+      enabled: {{ .Values.auth.authorino.tls.enabled }}
 {{- end }}

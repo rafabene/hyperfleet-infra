@@ -52,9 +52,9 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 Create the name of the ServiceAccount to use.
 */}}
 {{- define "hyperfleet-gateway.serviceAccountName" -}}
-{{- if .Values.serviceAccount.create }}
-{{- default (include "hyperfleet-gateway.fullname" .) .Values.serviceAccount.name }}
+{{- if .Values.deployment.serviceAccount.create }}
+{{- default (include "hyperfleet-gateway.fullname" .) .Values.deployment.serviceAccount.name }}
 {{- else }}
-{{- default "default" .Values.serviceAccount.name }}
+{{- default "default" .Values.deployment.serviceAccount.name }}
 {{- end }}
 {{- end }}

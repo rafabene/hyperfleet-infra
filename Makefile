@@ -699,8 +699,8 @@ validate-authorino: check-helm ## Validate gateway auth templates
 	@echo "Validating Authorino gateway templates..."
 	@for model in onprem oracle; do \
 		out=$$(helm template gw $(HELM_DIR)/hyperfleet-gateway \
-			--set extAuthz.enabled=true --set tenantModel=$$model \
-			--set oidc.issuerUrl=https://issuer.invalid/oidc 2>&1) \
+			--set auth.extAuthz.enabled=true --set tenant.model=$$model \
+			--set auth.oidc.issuerUrl=https://issuer.invalid/oidc 2>&1) \
 			|| { echo "ERROR: render failed for tenantModel=$$model"; echo "$$out"; exit 1; }; \
 		echo "$$out" | grep -q "failure_mode_allow: false" \
 			|| { echo "ERROR ($$model): ext_authz is not fail-closed"; exit 1; }; \
@@ -709,14 +709,14 @@ validate-authorino: check-helm ## Validate gateway auth templates
 		echo "$$out" | awk '/name: envoy.filters.http.ext_authz/{e=NR} /name: envoy.filters.http.router/{r=NR} END{exit !(e>0 && r>0 && e<r)}' \
 			|| { echo "ERROR ($$model): ext_authz must be ordered before router"; exit 1; }; \
 	done
-	@helm template gw $(HELM_DIR)/hyperfleet-gateway --set extAuthz.enabled=true --set tenantModel=onprem --set oidc.issuerUrl=https://issuer.invalid/oidc \
+	@helm template gw $(HELM_DIR)/hyperfleet-gateway --set auth.extAuthz.enabled=true --set tenant.model=onprem --set auth.oidc.issuerUrl=https://issuer.invalid/oidc \
 		| awk '/"x-tenant-project":/{f=1} f&&/when:/{g=1} f&&g&&/selector: auth.identity.project_id/{ok=1} END{exit !ok}' \
 		|| { echo "ERROR: onprem optional header x-tenant-project is not when-gated"; exit 1; }
-	@if helm template gw $(HELM_DIR)/hyperfleet-gateway --set extAuthz.enabled=true --set tenantModel=bogus >/dev/null 2>&1; then \
+	@if helm template gw $(HELM_DIR)/hyperfleet-gateway --set auth.extAuthz.enabled=true --set tenant.model=bogus >/dev/null 2>&1; then \
 		echo "ERROR: invalid tenantModel was accepted (expected fail-fast)"; exit 1; \
 	fi
-	@hosts_out=$$(helm template gw $(HELM_DIR)/hyperfleet-gateway --set extAuthz.enabled=true --set tenantModel=onprem \
-		--set oidc.issuerUrl=https://issuer.invalid/oidc --set authorino.hosts='{gateway.example.com}') \
+	@hosts_out=$$(helm template gw $(HELM_DIR)/hyperfleet-gateway --set auth.extAuthz.enabled=true --set tenant.model=onprem \
+		--set auth.oidc.issuerUrl=https://issuer.invalid/oidc --set auth.authorino.hosts='{gateway.example.com}') \
 		|| { echo "ERROR: render failed with authorino.hosts set"; exit 1; }; \
 	echo "$$hosts_out" | grep -q '"gw-hyperfleet-gateway"' \
 		|| { echo "ERROR: default gateway Service DNS host dropped when authorino.hosts is set"; exit 1; }; \

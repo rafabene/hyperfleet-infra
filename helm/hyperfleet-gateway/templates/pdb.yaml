@@ -1,9 +1,9 @@
-{{- if .Values.podDisruptionBudget.enabled }}
-{{- if and .Values.podDisruptionBudget.minAvailable .Values.podDisruptionBudget.maxUnavailable }}
-{{- fail "podDisruptionBudget: cannot set both minAvailable and maxUnavailable" }}
+{{- if .Values.deployment.podDisruptionBudget.enabled }}
+{{- if and .Values.deployment.podDisruptionBudget.minAvailable .Values.deployment.podDisruptionBudget.maxUnavailable }}
+{{- fail "deployment.podDisruptionBudget: cannot set both minAvailable and maxUnavailable" }}
 {{- end }}
-{{- if not (or .Values.podDisruptionBudget.minAvailable .Values.podDisruptionBudget.maxUnavailable) }}
-{{- fail "podDisruptionBudget.enabled is true but neither minAvailable nor maxUnavailable is set" }}
+{{- if not (or .Values.deployment.podDisruptionBudget.minAvailable .Values.deployment.podDisruptionBudget.maxUnavailable) }}
+{{- fail "deployment.podDisruptionBudget.enabled is true but neither minAvailable nor maxUnavailable is set" }}
 {{- end }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
@@ -12,14 +12,14 @@ metadata:
   labels:
     {{- include "hyperfleet-gateway.labels" . | nindent 4 }}
 spec:
-  {{- if and .Values.podDisruptionBudget.minAvailable (not .Values.podDisruptionBudget.maxUnavailable) }}
-  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  {{- if and .Values.deployment.podDisruptionBudget.minAvailable (not .Values.deployment.podDisruptionBudget.maxUnavailable) }}
+  minAvailable: {{ .Values.deployment.podDisruptionBudget.minAvailable }}
   {{- end }}
-  {{- if and .Values.podDisruptionBudget.maxUnavailable (not .Values.podDisruptionBudget.minAvailable) }}
-  maxUnavailable: {{ .Values.podDisruptionBudget.maxUnavailable }}
+  {{- if and .Values.deployment.podDisruptionBudget.maxUnavailable (not .Values.deployment.podDisruptionBudget.minAvailable) }}
+  maxUnavailable: {{ .Values.deployment.podDisruptionBudget.maxUnavailable }}
   {{- end }}
-  {{- if .Values.podDisruptionBudget.unhealthyPodEvictionPolicy }}
-  unhealthyPodEvictionPolicy: {{ .Values.podDisruptionBudget.unhealthyPodEvictionPolicy }}
+  {{- if .Values.deployment.podDisruptionBudget.unhealthyPodEvictionPolicy }}
+  unhealthyPodEvictionPolicy: {{ .Values.deployment.podDisruptionBudget.unhealthyPodEvictionPolicy }}
   {{- end }}
   selector:
     matchLabels:
