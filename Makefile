@@ -52,6 +52,7 @@ AUTHORINO_OPERATOR_MANIFEST       ?= https://raw.githubusercontent.com/Kuadrant/
 AUTHORINO_OPERATOR_MANIFEST_SHA256 ?= ce2bef459d1456cbe462754cad571f87150fc1ad8bee4f1d010eb0db5b0aabdd
 
 LIFECYCLE_DIR        ?= functions/lifecycle-enforcer
+OCI_SWEEP_DIR        ?= functions/oci-ci-sweep
 
 CLEANER_NAMESPACE    ?= $(NAMESPACE)
 CLEANER_SCHEDULE     ?= 0 * * * *
@@ -372,6 +373,22 @@ build-lifecycle-function: ## Build the lifecycle enforcer function
 lint-lifecycle-function: ## Lint the lifecycle enforcer function
 	@command -v go >/dev/null 2>&1 || { echo "ERROR: go is not installed"; exit 1; }
 	cd "$(LIFECYCLE_DIR)" && go vet ./...
+
+# ==== OCI CI Sweep Function Targets ====
+.PHONY: test-oci-sweep-function
+test-oci-sweep-function: ## Run unit tests for the OCI CI compartment sweep function
+	@command -v go >/dev/null 2>&1 || { echo "ERROR: go is not installed"; exit 1; }
+	cd "$(OCI_SWEEP_DIR)" && go test ./... -v
+
+.PHONY: build-oci-sweep-function
+build-oci-sweep-function: ## Build the OCI CI compartment sweep function
+	@command -v go >/dev/null 2>&1 || { echo "ERROR: go is not installed"; exit 1; }
+	cd "$(OCI_SWEEP_DIR)" && go build ./...
+
+.PHONY: lint-oci-sweep-function
+lint-oci-sweep-function: ## Lint the OCI CI compartment sweep function
+	@command -v go >/dev/null 2>&1 || { echo "ERROR: go is not installed"; exit 1; }
+	cd "$(OCI_SWEEP_DIR)" && go vet ./...
 
 .PHONY: add-ttl-labels
 add-ttl-labels: ## Add TTL labels to existing GKE clusters (DRY_RUN=true by default)
